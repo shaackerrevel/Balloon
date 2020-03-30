@@ -21,6 +21,7 @@ import androidx.lifecycle.LifecycleOwner
 import com.skydoves.balloon.ArrowOrientation
 import com.skydoves.balloon.Balloon
 import com.skydoves.balloon.createBalloon
+import com.skydoves.balloondemo.BalloonUtils
 import com.skydoves.balloondemo.R
 
 class TagBalloonFactory : Balloon.Factory() {
@@ -31,8 +32,8 @@ class TagBalloonFactory : Balloon.Factory() {
       setArrowSize(10)
       setArrowOrientation(ArrowOrientation.BOTTOM)
       setArrowPosition(0.5f)
-      setWidth(90)
-      setHeight(60)
+      setPadding(4)
+      isRtlSupport(BalloonUtils.isRtlLayout())
       setCornerRadius(4f)
       setBalloonAnimationStyle(R.style.ElasticAndFadeOut)
       setBackgroundColorResource(R.color.white_93)

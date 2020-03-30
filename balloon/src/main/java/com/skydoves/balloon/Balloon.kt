@@ -19,17 +19,19 @@
 package com.skydoves.balloon
 
 import android.annotation.SuppressLint
+import android.annotation.TargetApi
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
-import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Handler
 import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
+import android.widget.FrameLayout
 import android.widget.PopupWindow
 import android.widget.RelativeLayout
 import androidx.annotation.ColorInt
@@ -40,6 +42,7 @@ import androidx.annotation.LayoutRes
 import androidx.annotation.MainThread
 import androidx.annotation.StringRes
 import androidx.annotation.StyleRes
+import androidx.core.widget.ImageViewCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -47,7 +50,7 @@ import androidx.lifecycle.OnLifecycleEvent
 import com.skydoves.balloon.annotations.Dp
 import com.skydoves.balloon.annotations.Sp
 import kotlinx.android.synthetic.main.layout_balloon.view.balloon_arrow
-import kotlinx.android.synthetic.main.layout_balloon.view.balloon_background
+import kotlinx.android.synthetic.main.layout_balloon.view.balloon_card
 import kotlinx.android.synthetic.main.layout_balloon.view.balloon_content
 import kotlinx.android.synthetic.main.layout_balloon.view.balloon_detail
 import kotlinx.android.synthetic.main.layout_balloon.view.balloon_icon
@@ -76,25 +79,25 @@ class Balloon(
   var onBalloonClickListener: OnBalloonClickListener? = null
   var onBalloonDismissListener: OnBalloonDismissListener? = null
   var onBalloonOutsideTouchListener: OnBalloonOutsideTouchListener? = null
+  private var supportRtlLayoutFactor: Int = LTR.unaryMinus(builder.isRtlSupport)
   private val balloonPersistence = BalloonPersistence.getInstance(context)
 
   init {
     val inflater = context.getSystemService(Context.LAYOUT_INFLATER_SERVICE) as LayoutInflater
     this.bodyView = inflater.inflate(R.layout.layout_balloon, null)
-    val width = getMeasureWidth()
-    val params = RelativeLayout.LayoutParams(width, builder.height)
-    this.bodyView.layoutParams = params
-    this.bodyWindow = PopupWindow(bodyView, width, builder.height)
+    this.bodyWindow = PopupWindow(bodyView, RelativeLayout.LayoutParams.WRAP_CONTENT,
+      RelativeLayout.LayoutParams.WRAP_CONTENT)
     createByBuilder()
   }
 
   private fun createByBuilder() {
     initializeArrow()
     initializeBackground()
+    initializeBalloonWindow()
+    initializeBalloonContent()
     initializeBalloonListeners()
 
-    if (builder.layout == -1) {
-      initializeBalloonContent()
+    if (builder.layout == NO_INT_VALUE) {
       initializeIcon()
       initializeText()
     } else {
@@ -105,7 +108,7 @@ class Balloon(
 
   private fun initializeArrow() {
     with(bodyView.balloon_arrow) {
-      builder.arrowDrawable?.let { setImageDrawable(it) }
+      visible(builder.arrowVisible)
       val params = RelativeLayout.LayoutParams(builder.arrowSize, builder.arrowSize)
       when (builder.arrowOrientation) {
         ArrowOrientation.BOTTOM -> {
@@ -125,30 +128,41 @@ class Balloon(
           rotation = 90f
         }
       }
-      when (builder.arrowOrientation) {
-        ArrowOrientation.BOTTOM, ArrowOrientation.TOP ->
-          x = bodyWindow.width * builder.arrowPosition - (builder.arrowSize / 2)
-        ArrowOrientation.LEFT, ArrowOrientation.RIGHT ->
-          y = bodyWindow.height * builder.arrowPosition - (builder.arrowSize / 2)
+      bodyView.post {
+        when (builder.arrowOrientation) {
+          ArrowOrientation.BOTTOM, ArrowOrientation.TOP ->
+            x = bodyView.width * builder.arrowPosition - (builder.arrowSize / 2)
+          ArrowOrientation.LEFT, ArrowOrientation.RIGHT ->
+            y = bodyView.height * builder.arrowPosition - (builder.arrowSize / 2)
+        }
       }
       layoutParams = params
       alpha = builder.alpha
-      supportImageTintList = ColorStateList.valueOf(builder.backgroundColor)
-      visible(builder.arrowVisible)
+      builder.arrowDrawable?.let { setImageDrawable(it) }
+      if (builder.arrowColor != NO_INT_VALUE) {
+        ImageViewCompat.setImageTintList(this, ColorStateList.valueOf(builder.arrowColor))
+      } else {
+        ImageViewCompat.setImageTintList(this, ColorStateList.valueOf(builder.backgroundColor))
+      }
     }
   }
 
   private fun initializeBackground() {
-    with(bodyView.balloon_background) {
+    with(bodyView.balloon_card) {
       alpha = builder.alpha
       if (builder.backgroundDrawable == null) {
-        background = GradientDrawable().apply {
-          setColor(builder.backgroundColor)
-          cornerRadius = builder.cornerRadius
-        }
+        setCardBackgroundColor(builder.backgroundColor)
+        radius = builder.cornerRadius
       } else {
         background = builder.backgroundDrawable
       }
+    }
+  }
+
+  @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+  private fun initializeBalloonWindow() {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      bodyWindow.elevation = builder.elevation
     }
   }
 
@@ -167,10 +181,10 @@ class Balloon(
       setTouchInterceptor(object : View.OnTouchListener {
         @SuppressLint("ClickableViewAccessibility")
         override fun onTouch(view: View, event: MotionEvent): Boolean {
-          if (builder.dismissWhenTouchOutside) {
-            dismiss()
-          }
           if (event.action == MotionEvent.ACTION_OUTSIDE) {
+            if (builder.dismissWhenTouchOutside) {
+              this@Balloon.dismiss()
+            }
             onBalloonOutsideTouchListener?.onBalloonOutsideTouch(view, event)
             return true
           }
@@ -184,9 +198,19 @@ class Balloon(
     with(bodyView.balloon_content) {
       when (builder.arrowOrientation) {
         ArrowOrientation.BOTTOM, ArrowOrientation.TOP ->
-          setPadding(builder.arrowSize, builder.arrowSize, builder.arrowSize, builder.arrowSize)
+          setPadding(builder.arrowSize - 2, builder.arrowSize - 2, builder.arrowSize - 2,
+            builder.arrowSize - 2)
         ArrowOrientation.LEFT, ArrowOrientation.RIGHT ->
-          setPadding(builder.arrowSize, paddingTop, paddingBottom, builder.arrowSize)
+          setPadding(builder.arrowSize - 2, paddingTop - 2, paddingBottom - 2,
+            builder.arrowSize - 2)
+      }
+    }
+    with(bodyView.balloon_detail) {
+      if (builder.padding != NO_INT_VALUE) {
+        setPadding(builder.padding, builder.padding, builder.padding, builder.padding)
+      } else {
+        setPadding(builder.paddingLeft, builder.paddingTop,
+          builder.paddingRight, builder.paddingBottom)
       }
     }
   }
@@ -225,7 +249,7 @@ class Balloon(
   }
 
   private fun applyBalloonAnimation() {
-    if (builder.balloonAnimationStyle == -1) {
+    if (builder.balloonAnimationStyle == NO_INT_VALUE) {
       when (builder.balloonAnimation) {
         BalloonAnimation.ELASTIC -> bodyWindow.animationStyle = R.style.Elastic
         BalloonAnimation.CIRCULAR -> {
@@ -252,11 +276,17 @@ class Balloon(
       }
 
       val dismissDelay = this.builder.autoDismissDuration
-      if (dismissDelay != -1L) {
+      if (dismissDelay != NO_LONG_VALUE) {
         dismissWithDelay(dismissDelay)
       }
 
       anchor.post {
+        this.bodyView.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        this.bodyWindow.width = getMeasureWidth()
+        this.bodyWindow.height = getMeasureHeight()
+        this.bodyView.balloon_detail.layoutParams = FrameLayout.LayoutParams(
+          FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT)
+
         applyBalloonAnimation()
         block()
       }
@@ -277,8 +307,9 @@ class Balloon(
   /** shows the balloon on the center of an anchor view. */
   fun show(anchor: View) {
     show(anchor) {
-      bodyWindow.showAsDropDown(anchor, -(anchor.measuredWidth / 2),
-        -builder.height - (anchor.measuredHeight / 2))
+      bodyWindow.showAsDropDown(anchor,
+        supportRtlLayoutFactor * ((anchor.measuredWidth / 2) - (getMeasureWidth() / 2)),
+        -getMeasureHeight() - (anchor.measuredHeight / 2))
     }
   }
 
@@ -335,8 +366,8 @@ class Balloon(
   fun showAlignTop(anchor: View) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor,
-        (anchor.measuredWidth / 2) - (getMeasureWidth() / 2),
-        -builder.height - anchor.measuredHeight)
+        supportRtlLayoutFactor * ((anchor.measuredWidth / 2) - (getMeasureWidth() / 2)),
+        -getMeasureHeight() - anchor.measuredHeight)
     }
   }
 
@@ -353,8 +384,8 @@ class Balloon(
   fun showAlignTop(anchor: View, xOff: Int, yOff: Int) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor,
-        (anchor.measuredWidth / 2) - (getMeasureWidth() / 2) + xOff,
-        -builder.height - anchor.measuredHeight + yOff)
+        supportRtlLayoutFactor * ((anchor.measuredWidth / 2) - (getMeasureWidth() / 2) + xOff),
+        -getMeasureHeight() - anchor.measuredHeight + yOff)
     }
   }
 
@@ -371,7 +402,7 @@ class Balloon(
   fun showAlignBottom(anchor: View) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor,
-        (anchor.measuredWidth / 2) - (getMeasureWidth() / 2),
+        supportRtlLayoutFactor * ((anchor.measuredWidth / 2) - (getMeasureWidth() / 2)),
         0)
     }
   }
@@ -389,7 +420,7 @@ class Balloon(
   fun showAlignBottom(anchor: View, xOff: Int, yOff: Int) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor,
-        (anchor.measuredWidth / 2) - (getMeasureWidth() / 2) + xOff,
+        supportRtlLayoutFactor * ((anchor.measuredWidth / 2) - (getMeasureWidth() / 2) + xOff),
         yOff)
     }
   }
@@ -407,7 +438,7 @@ class Balloon(
   fun showAlignRight(anchor: View) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor, anchor.measuredWidth,
-        -(builder.height / 2) - (anchor.measuredHeight / 2))
+        -(getMeasureHeight() / 2) - (anchor.measuredHeight / 2))
     }
   }
 
@@ -424,7 +455,7 @@ class Balloon(
   fun showAlignRight(anchor: View, xOff: Int, yOff: Int) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor, anchor.measuredWidth + xOff,
-        -(builder.height / 2) - (anchor.measuredHeight / 2) + yOff)
+        -(getMeasureHeight() / 2) - (anchor.measuredHeight / 2) + yOff)
     }
   }
 
@@ -441,7 +472,7 @@ class Balloon(
   fun showAlignLeft(anchor: View) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor, -(getMeasureWidth()),
-        -(builder.height / 2) - (anchor.measuredHeight / 2))
+        -(getMeasureHeight() / 2) - (anchor.measuredHeight / 2))
     }
   }
 
@@ -458,7 +489,7 @@ class Balloon(
   fun showAlignLeft(anchor: View, xOff: Int, yOff: Int) {
     show(anchor) {
       bodyWindow.showAsDropDown(anchor, -(getMeasureWidth()) + xOff,
-        -(builder.height / 2) - (anchor.measuredHeight / 2) + yOff)
+        -(getMeasureHeight() / 2) - (anchor.measuredHeight / 2) + yOff)
     }
   }
 
@@ -478,7 +509,7 @@ class Balloon(
 
       val dismissWindow: () -> Unit = { this.bodyWindow.dismiss() }
       if (this.builder.balloonAnimation == BalloonAnimation.CIRCULAR) {
-        this.bodyWindow.contentView.circularUnRevealed() {
+        this.bodyWindow.contentView.circularUnRevealed {
           dismissWindow()
         }
       } else {
@@ -522,12 +553,22 @@ class Balloon(
     }
   }
 
-  /** gets measured width size of the balloon. */
+  /** gets measured width size of the balloon popup. */
   fun getMeasureWidth(): Int {
-    if (builder.widthRatio != 0f) {
+    if (builder.widthRatio != NO_Float_VALUE) {
       return (context.displaySize().x * builder.widthRatio - builder.space).toInt()
+    } else if (builder.width != NO_INT_VALUE) {
+      return builder.width
     }
-    return builder.width - builder.space
+    return this.bodyView.measuredWidth
+  }
+
+  /** gets measured height size of the balloon popup. */
+  fun getMeasureHeight(): Int {
+    if (builder.height != NO_INT_VALUE) {
+      return builder.height
+    }
+    return this.bodyView.measuredHeight
   }
 
   /** gets a content view of the balloon popup window. */
@@ -545,17 +586,29 @@ class Balloon(
   @BalloonDsl
   class Builder(private val context: Context) {
     @JvmField @Dp
-    var width: Int = context.displaySize().x
+    var width: Int = NO_INT_VALUE
     @JvmField @FloatRange(from = 0.0, to = 1.0)
-    var widthRatio: Float = 0f
+    var widthRatio: Float = NO_Float_VALUE
     @JvmField @Dp
-    var height: Int = context.dp2Px(60)
+    var height: Int = NO_INT_VALUE
+    @JvmField @Dp
+    var padding: Int = NO_INT_VALUE
+    @JvmField @Dp
+    var paddingLeft: Int = 0
+    @JvmField @Dp
+    var paddingTop: Int = 0
+    @JvmField @Dp
+    var paddingRight: Int = 0
+    @JvmField @Dp
+    var paddingBottom: Int = 0
     @JvmField @Dp
     var space: Int = 0
     @JvmField
     var arrowVisible: Boolean = true
+    @JvmField @ColorInt
+    var arrowColor: Int = NO_INT_VALUE
     @JvmField @Dp
-    var arrowSize: Int = context.dp2Px(15)
+    var arrowSize: Int = context.dp2Px(12)
     @JvmField @FloatRange(from = 0.0, to = 1.0)
     var arrowPosition: Float = 0.5f
     @JvmField
@@ -592,8 +645,10 @@ class Balloon(
     var iconForm: IconForm? = null
     @JvmField @FloatRange(from = 0.0, to = 1.0)
     var alpha: Float = 1f
+    @JvmField
+    var elevation: Float = context.dp2Px(2f)
     @JvmField @LayoutRes
-    var layout: Int = -1
+    var layout: Int = NO_INT_VALUE
     @JvmField
     var onBalloonClickListener: OnBalloonClickListener? = null
     @JvmField
@@ -607,17 +662,19 @@ class Balloon(
     @JvmField
     var dismissWhenClicked: Boolean = false
     @JvmField
-    var autoDismissDuration: Long = -1L
+    var autoDismissDuration: Long = NO_LONG_VALUE
     @JvmField
     var lifecycleOwner: LifecycleOwner? = null
     @JvmField @StyleRes
-    var balloonAnimationStyle: Int = -1
+    var balloonAnimationStyle: Int = NO_INT_VALUE
     @JvmField
     var balloonAnimation: BalloonAnimation = BalloonAnimation.FADE
     @JvmField
     var preferenceName: String? = null
     @JvmField
     var showTimes: Int = 1
+    @JvmField
+    var isRtlSupport: Boolean = false
 
     /** sets the width size. */
     fun setWidth(@Dp value: Int): Builder = apply { this.width = context.dp2Px(value) }
@@ -630,11 +687,38 @@ class Balloon(
     /** sets the height size. */
     fun setHeight(@Dp value: Int): Builder = apply { this.height = context.dp2Px(value) }
 
+    /** sets the padding on all directions. */
+    fun setPadding(@Dp value: Int): Builder = apply { this.padding = context.dp2Px(value) }
+
+    /** sets the left padding on all directions. */
+    fun setPaddingLeft(@Dp value: Int): Builder = apply { this.paddingLeft = context.dp2Px(value) }
+
+    /** sets the top padding on all directions. */
+    fun setPaddingTop(@Dp value: Int): Builder = apply { this.paddingTop = context.dp2Px(value) }
+
+    /** sets the right padding on all directions. */
+    fun setPaddingRight(@Dp value: Int): Builder = apply {
+      this.paddingRight = context.dp2Px(value)
+    }
+
+    /** sets the bottom padding on all directions. */
+    fun setPaddingBottom(@Dp value: Int): Builder = apply {
+      this.paddingBottom = context.dp2Px(value)
+    }
+
     /** sets the side space between popup and display. */
     fun setSpace(@Dp value: Int): Builder = apply { this.space = context.dp2Px(value) }
 
     /** sets the visibility of the arrow. */
     fun setArrowVisible(value: Boolean): Builder = apply { this.arrowVisible = value }
+
+    /** sets a color of the arrow. */
+    fun setArrowColor(@ColorInt value: Int): Builder = apply { this.arrowColor = value }
+
+    /** sets a color of the arrow using a resource. */
+    fun setArrowColorResource(@ColorRes value: Int): Builder = apply {
+      this.arrowColor = context.contextColor(value)
+    }
 
     /** sets the size of the arrow. */
     fun setArrowSize(@Dp value: Int): Builder = apply { this.arrowSize = context.dp2Px(value) }
@@ -740,6 +824,12 @@ class Balloon(
       this.alpha = value
     }
 
+    /** sets the elevation to the popup. */
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    fun setElevation(value: Float): Builder = apply {
+      this.elevation = value
+    }
+
     /** sets the custom layout resource to the popup content. */
     fun setLayout(@LayoutRes layout: Int): Builder = apply { this.layout = layout }
 
@@ -825,6 +915,9 @@ class Balloon(
 
     /** sets the show times. */
     fun setShowTime(value: Int): Builder = apply { this.showTimes = value }
+
+    /** sets flag for enabling rtl support */
+    fun isRtlSupport(value: Boolean): Builder = apply { this.isRtlSupport = value }
 
     fun build(): Balloon = Balloon(context, this@Builder)
   }
